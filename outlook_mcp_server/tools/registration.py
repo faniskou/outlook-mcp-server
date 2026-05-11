@@ -27,6 +27,10 @@ from . import (
     # Email operations
     reply_to_email_by_number_tool,
     compose_email_tool,
+    save_draft_email_tool,
+    save_reply_draft_by_number_tool,
+    send_draft_by_entry_id_tool,
+    delete_draft_by_entry_id_tool,
     move_email_tool,
     delete_email_by_number_tool,
     
@@ -63,6 +67,10 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     # Email operations
     mcp_server.tool(reply_to_email_by_number_tool)
     mcp_server.tool(compose_email_tool)
+    mcp_server.tool(save_draft_email_tool)
+    mcp_server.tool(save_reply_draft_by_number_tool)
+    mcp_server.tool(send_draft_by_entry_id_tool)
+    mcp_server.tool(delete_draft_by_entry_id_tool)
     mcp_server.tool(move_email_tool)
     mcp_server.tool(delete_email_by_number_tool)
     

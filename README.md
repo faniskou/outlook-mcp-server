@@ -82,7 +82,7 @@ The [`agent_prompt_template.md`](agent_prompt_template.md) defines how the AI as
 **Method 1: UVX (Recommended - Auto Dependencies)**
 ```bash
 # 1. Install
-git clone https://github.com/marlonluo2018/outlook-mcp-server.git
+git clone https://github.com/marlonluo2018/outlook-mcp-server.git  --> git clone https://github.com/faniskou/outlook-mcp-server.git
 cd outlook-mcp-server
 uvx --with "pywin32>=226" --with-editable "." outlook-mcp-server
 
@@ -101,7 +101,7 @@ uvx --with "pywin32>=226" --with-editable "." outlook-mcp-server
 **Method 2: Standard Python**
 ```bash
 # 1. Install
-git clone https://github.com/marlonluo2018/outlook-mcp-server.git
+git clone https://github.com/marlonluo2018/outlook-mcp-server.git  --> git clone https://github.com/faniskou/outlook-mcp-server.git
 cd outlook-mcp-server
 pip install -r requirements.txt
 python -m outlook_mcp_server
@@ -121,7 +121,7 @@ python -m outlook_mcp_server
 **Method 3: Direct Source (Development)**
 ```bash
 # 1. Install
-git clone https://github.com/marlonluo2018/outlook-mcp-server.git
+git clone https://github.com/marlonluo2018/outlook-mcp-server.git  --> git clone https://github.com/faniskou/outlook-mcp-server.git
 cd outlook-mcp-server
 pip install -r requirements.txt
 

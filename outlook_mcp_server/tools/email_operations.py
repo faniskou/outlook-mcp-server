@@ -1,7 +1,14 @@
 """Email operations tools for Outlook MCP Server."""
 
 from typing import Dict, Any, Union, List, Optional
-from ..backend.email_composition import reply_to_email_by_number, compose_email
+from ..backend.email_composition import (
+    reply_to_email_by_number,
+    compose_email,
+    save_draft_email,
+    save_reply_draft_by_number,
+    send_draft_by_entry_id,
+    delete_draft_by_entry_id,
+)
 from ..backend.outlook_session import OutlookSessionManager
 from ..backend.validation import ValidationError
 
@@ -83,6 +90,113 @@ def compose_email_tool(recipient_email: str, subject: str, body: str, cc_email: 
         return {"type": "text", "text": result}
     except Exception as e:
         return {"type": "text", "text": f"Error composing email: {str(e)}"}
+
+
+def save_draft_email_tool(
+    recipient_email: str,
+    subject: str,
+    body: str,
+    cc_email: Optional[str] = None,
+    html: bool = False,
+) -> Dict[str, Any]:
+    """Compose a new email and save it as a DRAFT in the Drafts folder (does NOT send).
+
+    Args:
+        recipient_email: Recipient email address(es), single or semicolon-separated.
+        subject: Email subject.
+        body: Email body content (plain text or HTML).
+        cc_email: Optional CC email address(es), single or semicolon-separated.
+        html: If True, body is treated as HTML.
+
+    Returns:
+        dict: {"type": "text", "text": "Draft saved to Drafts folder. EntryID: ..."}
+    """
+    if not recipient_email or not isinstance(recipient_email, str):
+        raise ValidationError("Recipient email must be a non-empty string")
+    if not subject or not isinstance(subject, str):
+        raise ValidationError("Subject must be a non-empty string")
+    if not body or not isinstance(body, str):
+        raise ValidationError("Body must be a non-empty string")
+
+    try:
+        to_recipients = [e.strip() for e in recipient_email.split(';') if e.strip()]
+        cc_recipients = None
+        if cc_email:
+            cc_recipients = [e.strip() for e in cc_email.split(';') if e.strip()]
+        result = save_draft_email(to_recipients, subject, body, cc_recipients, html=html)
+        return {"type": "text", "text": result}
+    except Exception as e:
+        return {"type": "text", "text": f"Error saving draft: {str(e)}"}
+
+
+def save_reply_draft_by_number_tool(
+    email_number: int,
+    reply_text: str,
+    to_recipients: Union[str, List[str], None] = None,
+    cc_recipients: Union[str, List[str], None] = None,
+    html: bool = False,
+) -> Dict[str, Any]:
+    """Create a reply draft for an email in the cache and save it to the Drafts folder (does NOT send).
+
+    Uses Outlook's native Reply()/ReplyAll() so the original quoted thread is preserved
+    exactly as Outlook would render it. The reply_text is prepended at the top.
+
+    Args:
+        email_number: Email's position in the cache (1-based)
+        reply_text: Text to prepend (HTML if html=True)
+        to_recipients: Override To (None = ReplyAll defaults). String or list of strings.
+        cc_recipients: Override CC. String or list of strings.
+        html: If True, reply_text is treated as HTML.
+
+    Returns:
+        dict: {"type": "text", "text": "Reply draft saved to Drafts folder. EntryID: ..."}
+    """
+    if not isinstance(email_number, int) or email_number < 1:
+        raise ValidationError("Email number must be a positive integer")
+    if not reply_text or not isinstance(reply_text, str):
+        raise ValidationError("Reply text must be a non-empty string")
+
+    try:
+        result = save_reply_draft_by_number(email_number, reply_text, to_recipients, cc_recipients, html=html)
+        return {"type": "text", "text": result}
+    except Exception as e:
+        return {"type": "text", "text": f"Error saving reply draft: {str(e)}"}
+
+
+def send_draft_by_entry_id_tool(entry_id: str) -> Dict[str, Any]:
+    """Open an existing draft (by EntryID) and send it.
+
+    Use this AFTER save_draft_email_tool / save_reply_draft_by_number_tool
+    once the user has explicitly confirmed (e.g. "send it"). This sends the
+    EXACT draft the user reviewed (HTML, signature, footer, quoted thread).
+
+    Args:
+        entry_id: Outlook EntryID returned by the save_*_draft tools.
+    """
+    if not entry_id or not isinstance(entry_id, str):
+        raise ValidationError("entry_id must be a non-empty string")
+    try:
+        result = send_draft_by_entry_id(entry_id)
+        return {"type": "text", "text": result}
+    except Exception as e:
+        return {"type": "text", "text": f"Error sending draft: {str(e)}"}
+
+
+def delete_draft_by_entry_id_tool(entry_id: str) -> Dict[str, Any]:
+    """Delete a draft (by EntryID). Moves it to Deleted Items.
+
+    Use when the user cancels/discards a previously saved draft.
+
+    Args:
+        entry_id: Outlook EntryID of the draft to delete.
+    """
+    if not entry_id or not isinstance(entry_id, str):
+        raise ValidationError("entry_id must be a non-empty string")
+    try:
+        result = delete_draft_by_entry_id(entry_id)
+        return {"type": "text", "text": result}
+    except Exception as e:
+        return {"type": "text", "text": f"Error deleting draft: {str(e)}"}
 
 
 def move_email_tool(email_number: int, target_folder_name: str) -> Dict[str, Any]:
