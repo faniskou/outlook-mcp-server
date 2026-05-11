@@ -370,3 +370,212 @@ def compose_email(
         except Exception as e:
             logger.error(f"Error composing email: {e}")
             return f"Error composing email: {str(e)}"
+
+
+def save_draft_email(
+    to_recipients: List[str],
+    subject: str,
+    body: str,
+    cc_recipients: Optional[List[str]] = None,
+    html: bool = False,
+) -> str:
+    """
+    Compose a new email and save it as a DRAFT (does NOT send).
+    The draft will appear in the user's Drafts folder in Outlook.
+
+    Args:
+        to_recipients: List of recipient email addresses
+        subject: Email subject line
+        body: Email body content (plain text or HTML)
+        cc_recipients: Optional list of CC email addresses
+        html: If True, body is treated as HTML (default: False)
+
+    Returns:
+        str: Success/error message including draft EntryID
+    """
+    if not to_recipients or not isinstance(to_recipients, list):
+        raise ValueError("To recipients must be a non-empty list")
+
+    with OutlookSessionManager() as session:
+        try:
+            encoded_to = [safe_encode_text(r, "to_recipient").strip() for r in to_recipients]
+            subject_safe = safe_encode_text(subject, "subject")
+            body_safe = safe_encode_text(body, "body")
+            encoded_cc = []
+            if cc_recipients:
+                encoded_cc = [safe_encode_text(r, "cc_recipient").strip() for r in cc_recipients]
+
+            mail = session.outlook.CreateItem(OutlookConstants.OL_MAIL_ITEM)
+            mail.To = "; ".join(encoded_to)
+            mail.Subject = subject_safe
+            if cc_recipients:
+                mail.CC = "; ".join(encoded_cc)
+
+            try:
+                if html:
+                    mail.HTMLBody = body_safe
+                else:
+                    mail.Body = body_safe
+            except Exception as e:
+                logger.warning(f"Failed to set body format, falling back to plain: {e}")
+                mail.Body = body_safe
+
+            mail.Save()
+            entry_id = getattr(mail, "EntryID", "")
+            logger.info(f"Draft saved successfully (EntryID={entry_id})")
+            return f"Draft saved to Drafts folder. EntryID: {entry_id}"
+
+        except Exception as e:
+            logger.error(f"Error saving draft: {e}")
+            return f"Error saving draft: {str(e)}"
+
+
+def save_reply_draft_by_number(
+    email_number: int,
+    reply_text: str,
+    to_recipients: Optional[Union[str, List[str]]] = None,
+    cc_recipients: Optional[Union[str, List[str]]] = None,
+    html: bool = False,
+) -> str:
+    """
+    Create a reply to a cached email and save it as a DRAFT (does NOT send).
+    Uses Outlook's native Reply()/ReplyAll() so the original thread/quoted
+    content is preserved exactly as in Outlook. The reply_text is prepended
+    to the body.
+
+    Args:
+        email_number: Email's position in the cache (1-based)
+        reply_text: Text to prepend to the reply (HTML if html=True)
+        to_recipients: Override To recipients (None = use Reply/ReplyAll defaults)
+        cc_recipients: Override CC recipients
+        html: If True, reply_text is treated as HTML
+
+    Returns:
+        str: Success/error message including draft EntryID
+    """
+    # Normalize recipient args (allow single string)
+    if isinstance(to_recipients, str):
+        to_recipients = [to_recipients]
+    if isinstance(cc_recipients, str):
+        cc_recipients = [cc_recipients]
+
+    try:
+        validate_cache_available(len(email_cache_order))
+        validate_email_number(email_number, len(email_cache_order))
+    except ValidationError as e:
+        raise ValueError(f"Invalid parameters: {e}")
+
+    entry_id = email_cache_order[email_number - 1]
+    cached_email = email_cache.get(entry_id)
+    if not cached_email:
+        raise ValueError(f"Email #{email_number} data not found in cache")
+
+    with OutlookSessionManager() as session:
+        try:
+            email_id = cached_email.get("id") or cached_email.get("entry_id")
+            if not email_id:
+                raise ValueError("Email ID not found in cached data")
+
+            original = session.namespace.GetItemFromID(email_id)
+            if not original:
+                raise RuntimeError("Could not retrieve the email from Outlook.")
+
+            # Use Outlook's native Reply / ReplyAll so quoted content is preserved
+            if to_recipients is None and cc_recipients is None:
+                reply = original.ReplyAll()
+            else:
+                reply = original.Reply()
+                if to_recipients is not None:
+                    reply.To = "; ".join(to_recipients)
+                if cc_recipients is not None:
+                    reply.CC = "; ".join(cc_recipients)
+
+            reply_text_safe = safe_encode_text(reply_text, "reply_text")
+
+            try:
+                if html:
+                    # Prepend HTML reply_text to the existing HTMLBody (which contains the quoted thread)
+                    existing_html = reply.HTMLBody or ""
+                    # Insert just after <body> if present, otherwise at top
+                    lower = existing_html.lower()
+                    body_idx = lower.find("<body")
+                    if body_idx != -1:
+                        end_tag = existing_html.find(">", body_idx)
+                        if end_tag != -1:
+                            reply.HTMLBody = (
+                                existing_html[: end_tag + 1]
+                                + reply_text_safe
+                                + existing_html[end_tag + 1 :]
+                            )
+                        else:
+                            reply.HTMLBody = reply_text_safe + existing_html
+                    else:
+                        reply.HTMLBody = reply_text_safe + existing_html
+                else:
+                    reply.Body = reply_text_safe + "\n\n" + (reply.Body or "")
+            except Exception as e:
+                logger.warning(f"Failed to set reply body, fallback to plain: {e}")
+                reply.Body = reply_text_safe + "\n\n" + (reply.Body or "")
+
+            reply.Save()
+            new_id = getattr(reply, "EntryID", "")
+            logger.info(f"Reply draft saved (EntryID={new_id})")
+            return f"Reply draft saved to Drafts folder. EntryID: {new_id}"
+
+        except Exception as e:
+            logger.error(f"Error saving reply draft: {e}")
+            return f"Error saving reply draft: {str(e)}"
+
+
+def send_draft_by_entry_id(entry_id: str) -> str:
+    """
+    Open an existing draft (by EntryID) from the Drafts folder and send it.
+
+    Args:
+        entry_id: The Outlook EntryID of the draft to send.
+
+    Returns:
+        str: Success or error message.
+    """
+    if not entry_id or not isinstance(entry_id, str):
+        raise ValueError("entry_id must be a non-empty string")
+
+    with OutlookSessionManager() as session:
+        try:
+            item = session.namespace.GetItemFromID(entry_id)
+            if not item:
+                raise RuntimeError("Could not retrieve draft from Outlook.")
+            subject = getattr(item, "Subject", "(no subject)")
+            item.Send()
+            logger.info(f"Sent draft EntryID={entry_id} (subject={subject})")
+            return f"Draft sent successfully (subject: {subject})"
+        except Exception as e:
+            logger.error(f"Error sending draft {entry_id}: {e}")
+            return f"Error sending draft: {str(e)}"
+
+
+def delete_draft_by_entry_id(entry_id: str) -> str:
+    """
+    Delete a draft (by EntryID). Moves it to Deleted Items.
+
+    Args:
+        entry_id: The Outlook EntryID of the draft to delete.
+
+    Returns:
+        str: Success or error message.
+    """
+    if not entry_id or not isinstance(entry_id, str):
+        raise ValueError("entry_id must be a non-empty string")
+
+    with OutlookSessionManager() as session:
+        try:
+            item = session.namespace.GetItemFromID(entry_id)
+            if not item:
+                raise RuntimeError("Could not retrieve draft from Outlook.")
+            subject = getattr(item, "Subject", "(no subject)")
+            item.Delete()
+            logger.info(f"Deleted draft EntryID={entry_id} (subject={subject})")
+            return f"Draft deleted (subject: {subject})"
+        except Exception as e:
+            logger.error(f"Error deleting draft {entry_id}: {e}")
+            return f"Error deleting draft: {str(e)}"
